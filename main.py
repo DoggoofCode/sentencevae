@@ -16,8 +16,10 @@ def _():
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
+    from torch.utils.data import DataLoader, Dataset
 
-    return F, nn, torch
+
+    return DataLoader, Dataset, F, nn, torch
 
 
 @app.cell
@@ -25,7 +27,7 @@ def _():
     import tiktoken
     enc = tiktoken.get_encoding("r50k_base")
     assert enc.decode(enc.encode("hello world")) == "hello world"
-    return (enc,)
+    return enc, tiktoken
 
 
 @app.cell
@@ -186,8 +188,94 @@ def _(slf_test, v):
 
 
 @app.cell
-def _():
-    return
+def _(Dataset, tiktoken, torch):
+    class SentenceDataset(Dataset):
+        def __init__(self, sentences, max_len=64):
+            self.enc = tiktoken.get_encoding("r50k_base")  # or "p50k_base", "r50k_base"
+            self.max_len = max_len
+            self.pad_token = 0  # tiktoken has no pad token, just use 0
+        
+            self.data = []
+            for sentence in sentences:
+                tokens = self.enc.encode(sentence)
+                # truncate or pad to max_len
+                tokens = tokens[:max_len]
+                tokens += [self.pad_token] * (max_len - len(tokens))
+                self.data.append(torch.tensor(tokens))
+
+        def __len__(self):
+            return len(self.data)
+
+        def __getitem__(self, idx):
+            return self.data[idx]
+
+    return (SentenceDataset,)
+
+
+@app.cell
+def _(
+    DataLoader,
+    SentenceDataset,
+    SentenceVAE,
+    sentences,
+    tiktoken,
+    tokenizer,
+    torch,
+):
+    # --- Training loop ---
+    def train(model, dataloader, optimizer, device, beta=1.0):
+        model.train()
+        total_loss = 0
+
+        for batch in dataloader:
+            batch = batch.to(device)
+            optimizer.zero_grad()
+
+            logits, recon_loss, kl_loss = model(batch)
+            loss = recon_loss + beta * kl_loss
+
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # prevent exploding gradients
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        return total_loss / len(dataloader)
+
+
+    # --- KL annealing ---
+    def get_beta(epoch, warmup_epochs=10):
+        # gradually increase KL weight so model doesn't collapse early
+        return min(1.0, epoch / warmup_epochs)
+
+
+    # --- Put it all together ---
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    enc = tiktoken.get_encoding("cl100k_base")
+
+    dataset = SentenceDataset(sentences)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    model = SentenceVAE(
+        vocab_size=enc.n_vocab,   # 100277 for cl100k_base
+        embedding_dim=256,
+        num_heads=8,
+        latent_dim=64,
+    ).to(device)
+
+    dataset = SentenceDataset(sentences, tokenizer)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50)
+
+    for epoch in range(50):
+        beta = get_beta(epoch, warmup_epochs=10)
+        loss = train(model, dataloader, optimizer, device, beta=beta)
+        scheduler.step()
+        print(f"epoch {epoch+1} | loss {loss:.4f} | beta {beta:.2f}")
+    return (enc,)
 
 
 if __name__ == "__main__":
