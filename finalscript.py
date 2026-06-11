@@ -15,12 +15,15 @@ assert enc.decode(enc.encode("hello world")) == "hello world"
 # %%
 LR = 1e-3
 EMBEDDING_VOCAB = enc.n_vocab
-EMBEDDING_DIM=256
-MAX_SEQ_LEN=128
+MAX_SEQ_LEN=64
 ACCUMULATION_STEPS = 3
 BATCH_SIZE = 16
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEVICE = device
+# Model CONFIG
+MODEL_EMBED_DIM = 512
+MODEL_NUM_HEADS = 4
+MODEL_LATENT_DIM = 256
 
 # %%
 class SelfAttentionLayer(nn.Module):
@@ -213,11 +216,6 @@ train_dataset, val_dataset = random_split(datasetcls, [train_size, val_size])
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
-
-# Model CONFIG
-MODEL_EMBED_DIM = 512
-MODEL_NUM_HEADS = 4
-MODEL_LATENT_DIM = 256
 
 model = SentenceVAE(
     embedding_dim=MODEL_EMBED_DIM,
