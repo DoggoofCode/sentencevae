@@ -160,7 +160,7 @@ class SentenceDataset(Dataset):
         tokens += [0] * (self.max_len - len(tokens))
         return torch.tensor(tokens, dtype=torch.long)
 
-scaler = GradScaler(device)
+scaler = GradScaler("cuda")
 
 def train(model, dataloader, optimizer, device, beta=1.0):
     model.train()
@@ -172,7 +172,7 @@ def train(model, dataloader, optimizer, device, beta=1.0):
     for i, batch in enumerate(pbar):
         batch = batch.to(device)
 
-        with autocast(device):
+        with autocast("cuda"):
             logits, recon_loss, kl_loss = model(batch)
             loss = (recon_loss + 0.001 * kl_loss) / ACCUMULATION_STEPS
 
