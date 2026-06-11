@@ -254,7 +254,6 @@ while (req := input("RQ: ")) != "q":
     test_sentence = torch.LongTensor(enc.encode(req)).reshape(1, -1).to(DEVICE)
     logits, _, _ = model(test_sentence)
     to_words(logits)
-    req = input("RQ: ")
 
 # %%
 
