@@ -1,18 +1,11 @@
-
-__generated_with = "0.23.9"
-
-# %%
-import marimo as mo
 import re
-
-# %%
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, random_split
-
-
-# %%
+from torch.amp import autocast, GradScaler
+from tqdm import tqdm
 import tiktoken
 from datasets import load_dataset
 
@@ -20,11 +13,14 @@ enc = tiktoken.get_encoding("r50k_base")
 assert enc.decode(enc.encode("hello world")) == "hello world"
 
 # %%
-DEVICE = "cpu"
 LR = 1e-3
 EMBEDDING_VOCAB = enc.n_vocab
 EMBEDDING_DIM=256
-MAX_SEQ_LEN=1000
+MAX_SEQ_LEN=64
+ACCUMULATION_STEPS = 3
+BATCH_SIZE = 8
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = device
 
 # %%
 class SelfAttentionLayer(nn.Module):
@@ -164,15 +160,7 @@ class SentenceDataset(Dataset):
         tokens += [0] * (self.max_len - len(tokens))
         return torch.tensor(tokens, dtype=torch.long)
 
-# %%
-# --- Training loop ---
-from tqdm import tqdm
-
-ACCUMULATION_STEPS = 3
-
-from torch.amp import autocast, GradScaler
-
-scaler = GradScaler("cuda")
+scaler = GradScaler(device)
 
 def train(model, dataloader, optimizer, device, beta=1.0):
     model.train()
@@ -184,7 +172,7 @@ def train(model, dataloader, optimizer, device, beta=1.0):
     for i, batch in enumerate(pbar):
         batch = batch.to(device)
 
-        with autocast("cuda"):
+        with autocast(device):
             logits, recon_loss, kl_loss = model(batch)
             loss = (recon_loss + 0.001 * kl_loss) / ACCUMULATION_STEPS
 
@@ -216,14 +204,8 @@ def get_beta(epoch, warmup_epochs=40):
 
 
 # --- Put it all together ---
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# %%
-import os
-
-BATCH_SIZE = 8
-
-datasetcls = SentenceDataset("fineweb.jsonl", max_points=400_000)
+datasetcls = SentenceDataset("fineweb.jsonl", max_points=100_000)
 
 train_size = int(0.9 * len(datasetcls))
 val_size = len(datasetcls) - train_size
@@ -232,29 +214,35 @@ train_dataset, val_dataset = random_split(datasetcls, [train_size, val_size])
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
 
+# Model CONFIG
+MODEL_EMBED_DIM = 512
+MODEL_NUM_HEADS = 4
+MODEL_LATENT_DIM = 256
+
 model = SentenceVAE(
-    embedding_dim=128,
-    num_heads=4,
-    latent_dim=16,
+    embedding_dim=MODEL_EMBED_DIM,
+    num_heads=MODEL_NUM_HEADS,
+    latent_dim=MODEL_LATENT_DIM,
 ).to(device)
-if os.path.isfile("checkpoint.pt"):
-    model.load_state_dict(torch.load("checkpoint.pt"))
+checkpoint_name = f"checkpoint_{MODEL_EMBED_DIM}{MODEL_LATENT_DIM}.pt"
+if os.path.isfile(checkpoint_name):
+    model.load_state_dict(torch.load(checkpoint_name, map_location=DEVICE))
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50)
 
-for epoch in range(50):
-    beta = get_beta(epoch, warmup_epochs=10)
-    train_loss, recon, kl = train(model, train_loader, optimizer, device, beta)
-    # val_loss, val_recon, val_kl = validate(model, val_loader, device, beta)
-    scheduler.step()
-    # print(f"epoch {epoch+1} | train {train_loss:.4f} | val {val_loss:.4f} | recon {recon:.4f} | kl {kl:.4f} | beta {beta:.2f}")
-    torch.save(model.state_dict(), "checkpoint.pt")
+try:
+    for epoch in range(50):
+        beta = get_beta(epoch, warmup_epochs=10)
+        train_loss, recon, kl = train(model, train_loader, optimizer, device, beta)
+        scheduler.step()
+        print(f"epoch {epoch+1} | train {train_loss:.4f} | recon {recon:.4f} | kl {kl:.4f} | beta {beta:.2f}")A
+        torch.save(model.state_dict(), checkpoint_name)
+except KeyboardInterrupt:
+    pass
 
-# %%
-torch.save(model.state_dict(), "checkpoint.pt")
+torch.save(model.state_dict(), checkpoint_name)
 
-# %%
 def to_words(logits):
     token_ids = logits.argmax(dim=-1)
     token_ids = token_ids[0].tolist()
@@ -262,14 +250,13 @@ def to_words(logits):
     token_ids = [t for t in token_ids if t != 0]
     print(enc.decode(token_ids))
 
-# %%
-enc.encode("The cat sat underneath the tree.")
-
-# %%
 model.eval()
-test_sentence = torch.LongTensor(enc.encode("He cried, 'I don't want to go to Timor Leste")).reshape(1, -1).to("cuda")
-logits, _, _ = model(test_sentence)
-to_words(logits)
+
+while (req := input("RQ: ")) != "q":
+    test_sentence = torch.LongTensor(enc.encode(req)).reshape(1, -1).to(DEVICE)
+    logits, _, _ = model(test_sentence)
+    to_words(logits)
+    req = input("RQ: ")
 
 # %%
 
