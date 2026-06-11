@@ -16,9 +16,9 @@ assert enc.decode(enc.encode("hello world")) == "hello world"
 LR = 1e-3
 EMBEDDING_VOCAB = enc.n_vocab
 EMBEDDING_DIM=256
-MAX_SEQ_LEN=64
+MAX_SEQ_LEN=128
 ACCUMULATION_STEPS = 3
-BATCH_SIZE = 8
+BATCH_SIZE = 16
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEVICE = device
 
@@ -236,7 +236,7 @@ try:
         beta = get_beta(epoch, warmup_epochs=10)
         train_loss, recon, kl = train(model, train_loader, optimizer, device, beta)
         scheduler.step()
-        print(f"epoch {epoch+1} | train {train_loss:.4f} | recon {recon:.4f} | kl {kl:.4f} | beta {beta:.2f}")A
+        print(f"epoch {epoch+1} | train {train_loss:.4f} | recon {recon:.4f} | kl {kl:.4f} | beta {beta:.2f}")
         torch.save(model.state_dict(), checkpoint_name)
 except KeyboardInterrupt:
     pass
