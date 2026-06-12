@@ -76,7 +76,7 @@ class SentenceVAE(nn.Module):
         # encoder
         self.embed = nn.Embedding(EMBEDDING_VOCAB, embedding_dim)
         self.pos_embed = nn.Embedding(MAX_SEQ_LEN, embedding_dim)
-        self.attn_layers: list[SelfAttentionLayer] = [SelfAttentionLayer(embedding_dim, num_heads) for _ in range(transformer_blocks)]
+        self.attn_layers: nn.ModuleList = nn.ModuleList([SelfAttentionLayer(embedding_dim, num_heads) for _ in range(transformer_blocks)])
         # self.attn1 = SelfAttentionLayer(embedding_dim, num_heads)
         # self.attn2 = SelfAttentionLayer(embedding_dim, num_heads)
         # self.attn3 = SelfAttentionLayer(embedding_dim, num_heads)
@@ -85,7 +85,7 @@ class SentenceVAE(nn.Module):
 
         # decoder
         self.fc_in = nn.Linear(latent_dim, embedding_dim)
-        self.crs_attn_layers: list[CrossAttentionLayer] = [CrossAttentionLayer(embedding_dim, num_heads) for _ in range(transformer_blocks)]
+        self.crs_attn_layers: nn.ModuleList = nn.ModuleList([CrossAttentionLayer(embedding_dim, num_heads) for _ in range(transformer_blocks)])
         # self.crs_attn1 = CrossAttentionLayer(embedding_dim, num_heads)
         # self.crs_attn2 = CrossAttentionLayer(embedding_dim, num_heads)
         # self.crs_attn3 = CrossAttentionLayer(embedding_dim, num_heads)
