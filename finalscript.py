@@ -1,4 +1,3 @@
-import re
 import os
 import torch
 import torch.nn as nn
@@ -7,12 +6,10 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 import tiktoken
-from datasets import load_dataset
 
 enc = tiktoken.get_encoding("r50k_base")
 assert enc.decode(enc.encode("hello world")) == "hello world"
 
-# %%
 LR = 1e-3
 EMBEDDING_VOCAB = enc.n_vocab
 MAX_SEQ_LEN=64
@@ -24,8 +21,8 @@ DEVICE = device
 MODEL_EMBED_DIM = 512
 MODEL_NUM_HEADS = 4
 MODEL_LATENT_DIM = 256
+MODEL_TRANSFORMER_BLOCKS = 64
 
-# %%
 class SelfAttentionLayer(nn.Module):
     def __init__(self, embedding_dim: int, num_heads: int, dropout = 0.1):
         super().__init__()
@@ -74,22 +71,24 @@ class CrossAttentionLayer(nn.Module):
 
 # %%
 class SentenceVAE(nn.Module):
-    def __init__(self, embedding_dim: int, num_heads: int, latent_dim: int, dropout = 0.1):
+    def __init__(self, embedding_dim: int, num_heads: int, latent_dim: int, transformer_blocks: int, dropout = 0.1):
         super().__init__()
         # encoder
         self.embed = nn.Embedding(EMBEDDING_VOCAB, embedding_dim)
         self.pos_embed = nn.Embedding(MAX_SEQ_LEN, embedding_dim)
-        self.attn1 = SelfAttentionLayer(embedding_dim, num_heads)
-        self.attn2 = SelfAttentionLayer(embedding_dim, num_heads)
-        self.attn3 = SelfAttentionLayer(embedding_dim, num_heads)
+        self.attn_layers: list[SelfAttentionLayer] = [SelfAttentionLayer(embedding_dim, num_heads) for _ in range(transformer_blocks)]
+        # self.attn1 = SelfAttentionLayer(embedding_dim, num_heads)
+        # self.attn2 = SelfAttentionLayer(embedding_dim, num_heads)
+        # self.attn3 = SelfAttentionLayer(embedding_dim, num_heads)
         self.fc_mean = nn.Linear(embedding_dim, latent_dim)
         self.fc_log_var = nn.Linear(embedding_dim, latent_dim)
 
         # decoder
         self.fc_in = nn.Linear(latent_dim, embedding_dim)
-        self.crs_attn1 = CrossAttentionLayer(embedding_dim, num_heads)
-        self.crs_attn2 = CrossAttentionLayer(embedding_dim, num_heads)
-        self.crs_attn3 = CrossAttentionLayer(embedding_dim, num_heads)
+        self.crs_attn_layers: list[CrossAttentionLayer] = [CrossAttentionLayer(embedding_dim, num_heads) for _ in range(transformer_blocks)]
+        # self.crs_attn1 = CrossAttentionLayer(embedding_dim, num_heads)
+        # self.crs_attn2 = CrossAttentionLayer(embedding_dim, num_heads)
+        # self.crs_attn3 = CrossAttentionLayer(embedding_dim, num_heads)
         self.norm = nn.LayerNorm(embedding_dim)
         self.lm_head = nn.Linear(embedding_dim, EMBEDDING_VOCAB, bias=False)
 
@@ -97,12 +96,11 @@ class SentenceVAE(nn.Module):
 
 
     # Returns (1, embed_dim)
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: torch.Tensor):
         positions = torch.arange(x.size(0), device=x.device).unsqueeze(1)
         x = self.embed(x) + self.pos_embed(positions)
-        x = self.attn1(x)
-        x = self.attn2(x)
-        x = self.attn3(x)
+        for block in self.attn_layers:
+            x = block(x)
         pooled = x.mean(dim = 1)
         mu = self.fc_mean(pooled)
         log_var = self.fc_log_var(pooled)
@@ -110,9 +108,11 @@ class SentenceVAE(nn.Module):
 
     def decode(self, z: torch.Tensor, seq_len) -> torch.Tensor:
         x = self.fc_in(z).unsqueeze(1).expand(-1, seq_len, -1).clone()
-        x = self.crs_attn1(x)
-        x = self.crs_attn2(x)
-        x = self.crs_attn3(x)
+        for block in self.crs_attn_layers:
+            x = block(x)
+        # x = self.crs_attn1(x)
+        # x = self.crs_attn2(x)
+        # x = self.crs_attn3(x)
         return self.lm_head(self.norm(x))  # (batch, seq, vocab_size)
 
     def reparameterise(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
@@ -221,6 +221,7 @@ model = SentenceVAE(
     embedding_dim=MODEL_EMBED_DIM,
     num_heads=MODEL_NUM_HEADS,
     latent_dim=MODEL_LATENT_DIM,
+    transformer_blocks=MODEL_TRANSFORMER_BLOCKS,
 ).to(device)
 checkpoint_name = f"checkpoint_{MODEL_EMBED_DIM}{MODEL_LATENT_DIM}.pt"
 if os.path.isfile(checkpoint_name):
