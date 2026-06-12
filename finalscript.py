@@ -223,7 +223,7 @@ model = SentenceVAE(
     latent_dim=MODEL_LATENT_DIM,
     transformer_blocks=MODEL_TRANSFORMER_BLOCKS,
 ).to(device)
-checkpoint_name = f"checkpoint_{MODEL_EMBED_DIM}{MODEL_LATENT_DIM}.pt"
+checkpoint_name = f"checkpoint_{MODEL_EMBED_DIM}{MODEL_LATENT_DIM}{MODEL_TRANSFORMER_BLOCKS}.pt"
 if os.path.isfile(checkpoint_name):
     model.load_state_dict(torch.load(checkpoint_name, map_location=DEVICE))
 
