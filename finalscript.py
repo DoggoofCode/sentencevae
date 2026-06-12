@@ -14,13 +14,13 @@ LR = 1e-3
 EMBEDDING_VOCAB = enc.n_vocab
 MAX_SEQ_LEN=64
 ACCUMULATION_STEPS = 3
-BATCH_SIZE = 16
+BATCH_SIZE = 64
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEVICE = device
 # Model CONFIG
-MODEL_EMBED_DIM = 512
-MODEL_NUM_HEADS = 4
-MODEL_LATENT_DIM = 256
+MODEL_EMBED_DIM = 750
+MODEL_NUM_HEADS = 10
+MODEL_LATENT_DIM = 362
 MODEL_TRANSFORMER_BLOCKS = 64
 
 class SelfAttentionLayer(nn.Module):
