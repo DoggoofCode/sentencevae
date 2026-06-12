@@ -21,7 +21,7 @@ DEVICE = device
 MODEL_EMBED_DIM = 750
 MODEL_NUM_HEADS = 10
 MODEL_LATENT_DIM = 362
-MODEL_TRANSFORMER_BLOCKS = 64
+MODEL_TRANSFORMER_BLOCKS = 24
 
 class SelfAttentionLayer(nn.Module):
     def __init__(self, embedding_dim: int, num_heads: int, dropout = 0.1):
@@ -117,6 +117,7 @@ class SentenceVAE(nn.Module):
 
     def reparameterise(self, mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
         if self.training:
+            log_var = torch.clamp(log_var, -10., 10.)
             std = torch.exp(0.5 * log_var)
             return mu + torch.rand_like(std) * std
         return mu
@@ -183,7 +184,7 @@ def train(model, dataloader, optimizer, device, beta=1.0):
 
         if (i + 1) % ACCUMULATION_STEPS == 0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
@@ -227,7 +228,7 @@ checkpoint_name = f"checkpoint_{MODEL_EMBED_DIM}{MODEL_LATENT_DIM}{MODEL_TRANSFO
 if os.path.isfile(checkpoint_name):
     model.load_state_dict(torch.load(checkpoint_name, map_location=DEVICE))
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.01)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50)
 
 try:
